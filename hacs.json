@@ -1,0 +1,6 @@
+{
+    "name": "Heatapp local integration (beta)",
+    "render_readme": true,
+    "homeassistant": "2023.5.0",
+    "hacs": "1.28.4"
+  }
