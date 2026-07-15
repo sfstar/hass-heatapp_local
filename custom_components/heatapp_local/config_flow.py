@@ -1,73 +1,81 @@
 """Config flow for heatapp_local integration."""
 import logging
+from json import JSONDecodeError
+import re
 
+import requests
 import voluptuous as vol
 
 from homeassistant import config_entries, core, exceptions
+from homeassistant.helpers.selector import (
+    TextSelector,
+    TextSelectorConfig,
+    TextSelectorType,
+    NumberSelector,
+    NumberSelectorConfig,
+    NumberSelectorMode,
+)
 
-from .const import DOMAIN, CONF_USER, CONF_PASSWORD, CONF_HOST, CONF_INTERVAL  # pylint:disable=unused-import
+from .const import DOMAIN, CONF_USER, CONF_PASSWORD, CONF_HOST, CONF_INTERVAL
 
 from heatapp.login import Login
 
 _LOGGER = logging.getLogger(__name__)
 
-# TODO adjust the data schema to the data that you need and use voloptous to constrain input
-STEP_USER_DATA_SCHEMA = vol.Schema({CONF_HOST: str, CONF_USER: str, CONF_PASSWORD: str, CONF_INTERVAL: int})
+STEP_USER_DATA_SCHEMA = vol.Schema(
+    {
+        vol.Required(CONF_HOST): TextSelector(),
+        vol.Required(CONF_USER): TextSelector(),
+        vol.Required(CONF_PASSWORD): TextSelector(
+            TextSelectorConfig(type=TextSelectorType.PASSWORD)
+        ),
+        vol.Required(CONF_INTERVAL, default=60): NumberSelector(
+            NumberSelectorConfig(min=10, max=3600, mode=NumberSelectorMode.BOX)
+        ),
+    }
+)
 
 
-class PlaceholderHub:
-    """Placeholder class to make tests pass.
-
-    TODO Remove this placeholder class and replace with things from your PyPI package.
-    """
-
-    def __init__(self, host):
-        """Initialize."""
-        self.host = host
-
-    async def authenticate(self, username, password) -> bool:
-        """Test if we can authenticate with the host."""
-        
-        return True
+def _normalize_base_url(host: str) -> str:
+    """Ensure the host is just an IP or hostname without scheme."""
+    host = host.strip()
+    # Remove protocol if user included it
+    host = re.sub(r"^https?://", "", host)
+    # Remove any trailing path or slash
+    host = host.split('/')[0]
+    return host.rstrip("/")
 
 
 async def validate_input(hass: core.HomeAssistant, data):
-    """Validate the user input allows us to connect.
+    """Validate the user input allows us to connect."""
+    base_url = _normalize_base_url(data[CONF_HOST])
 
-    Data has the keys from STEP_USER_DATA_SCHEMA with values provided by the user.
-    """
-    # TODO validate the data can be used to set up a connection.
+    login = Login(base_url)
 
-    # If your PyPI package is not built with async, pass your methods
-    # to the executor:
-    # await hass.async_add_executor_job(
-    #     your_validate_func, data["username"], data["password"]
-    # )
-    login = Login("http://" + data[CONF_HOST])
-    await hass.async_add_executor_job(
-        login.authorize, data[CONF_USER], data[CONF_PASSWORD]
-    )
+    try:
+        # heatapp library is sync, run in executor
+        await hass.async_add_executor_job(
+            login.authorize, data[CONF_USER], data[CONF_PASSWORD]
+        )
+    except (requests.exceptions.RequestException, JSONDecodeError) as err:
+        # Network/HTTP errors or invalid/empty JSON -> cannot connect
+        raise CannotConnect from err
 
-    hub = PlaceholderHub(data["host"])
-
-    if not await hub.authenticate(data[CONF_USER], data[CONF_PASSWORD]):
-        raise InvalidAuth
-
-    # If you cannot connect:
-    # throw CannotConnect
-    # If the authentication is wrong:
-    # InvalidAuth
-
-    # Return info that you want to store in the config entry.
-    return {"title": "Name of the device"}
+    # Return info to store in the config entry.
+    return {
+        "title": base_url,
+        "data": {
+            CONF_HOST: base_url,
+            CONF_USER: data[CONF_USER],
+            CONF_PASSWORD: data[CONF_PASSWORD],
+        },
+    }
 
 
 class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for heatapp_local."""
 
     VERSION = 1
-    # TODO pick one of the available connection classes in homeassistant/config_entries.py
-    CONNECTION_CLASS = config_entries.CONN_CLASS_UNKNOWN
 
     async def async_step_user(self, user_input=None):
         """Handle the initial step."""
@@ -88,7 +96,12 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             _LOGGER.exception("Unexpected exception")
             errors["base"] = "unknown"
         else:
-            return self.async_create_entry(title=info["title"], data={}, options=user_input)
+            # Store host/user/password in data; interval in options
+            return self.async_create_entry(
+                title=info["title"],
+                data=info["data"],
+                options={CONF_INTERVAL: user_input[CONF_INTERVAL]},
+            )
 
         return self.async_show_form(
             step_id="user", data_schema=STEP_USER_DATA_SCHEMA, errors=errors

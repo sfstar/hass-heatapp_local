@@ -1,0 +1,22 @@
+{
+    "config": {
+        "abort": {
+            "already_configured": "Dispositivo gia' configurato"
+        },
+        "error": {
+            "cannot_connect": "Errore di Connessione",
+            "invalid_auth": "Autenticazione Fallita",
+            "unknown": "Errore Inaspettatot"
+        },
+        "step": {
+            "user": {
+                "data": {
+                    "host": "IP dell'HeatApp Base",
+                    "password": "Password",
+                    "username": "Nome Utente",
+                    "interval": "Intervallo di Refresh"
+                }
+            }
+        }
+    }
+}

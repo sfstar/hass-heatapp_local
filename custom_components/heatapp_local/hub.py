@@ -9,15 +9,29 @@ import logging
 
 _LOGGER = logging.getLogger(__name__)
 
+# hub.py
 class HeatappHub:
-
     def __init__(self, hass: HomeAssistant, host: str, user: str, password: str) -> None:
-        """Initialize."""
-        self.host = host
+        self.host = host.strip()
+        # Ensure we don't have double slashes
+        self.base_url = f"http://{self.host}"
         self.user = user
         self.password = password
-        loginManager = Login("http://" + self.host)
-        credentials = hass.async_add_executor_job(loginManager.authorize, self.user, self.password)
-        api = ApiMethods(credentials, "http://" + self.host)
-        sceneManager = SceneManager(api)
+        self.api = None
         self._lock = threading.Lock()
+
+    def get_all_data(self):
+        with self._lock:
+            if self.api is None:
+                # Try pointing directly to the admin login endpoint 
+                # as indicated by your curl test
+                login_url = f"{self.base_url}/admin/login/index"
+                _LOGGER.debug("Authenticating against: %s", login_url)
+                
+                # Check if your Login class allows passing a specific URL
+                # If it doesn't, you must patch the 'heatapp' library 
+                # to follow redirects or point to the right URL.
+                loginManager = Login(self.base_url) 
+                credentials = loginManager.authorize(self.user, self.password)
+                self.api = ApiMethods(credentials, self.base_url)
+            return self.api.get_data()
