@@ -128,6 +128,7 @@ class HeatAppClimateEntity(CoordinatorEntity, ClimateEntity):
             "identifiers": {(DOMAIN, uid)},
             "name": self.name,
             "manufacturer": "HeatApp (Danfoss)",
+            "via_device": (DOMAIN, self.coordinator.entry_id),
         }
 
     @property
