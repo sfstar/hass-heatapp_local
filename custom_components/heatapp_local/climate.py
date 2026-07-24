@@ -33,33 +33,52 @@ async def async_setup_entry(
     config_entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up heatapp climate entities from a config entry[cite: 2]."""
+    """Set up heatapp climate entities from a config entry."""
     coordinator = hass.data[DOMAIN][config_entry.entry_id]
 
     if coordinator.data:
-        async_add_entities(
-            HeatAppClimateEntity(coordinator, idx) 
-            for idx, _ in enumerate(coordinator.data)
-        )
+        entities = []
+        if isinstance(coordinator.data, dict):
+            for room_key in coordinator.data.keys():
+                entities.append(HeatAppClimateEntity(coordinator, room_key))
+        elif isinstance(coordinator.data, list):
+            for idx, _ in enumerate(coordinator.data):
+                entities.append(HeatAppClimateEntity(coordinator, idx))
+        
+        if entities:
+            async_add_entities(entities)
+            _LOGGER.info("Successfully added %d HeatApp climate entities", len(entities))
+        else:
+            _LOGGER.warning("Coordinator data found, but no entities could be generated")
 
 
 class HeatAppClimateEntity(CoordinatorEntity, ClimateEntity):
-    """Representation of a HeatApp Thermostat device[cite: 2]."""
+    """Representation of a HeatApp Thermostat device."""
 
-    def __init__(self, coordinator, heatapp_room_idx: int) -> None:
-        """Pass coordinator to CoordinatorEntity[cite: 2]."""
+    def __init__(self, coordinator, room_key) -> None:
+        """Pass coordinator to CoordinatorEntity."""
         super().__init__(coordinator)
-        self.idx = heatapp_room_idx
+        self.room_key = room_key
         self._activeMode = HVACMode.HEAT
         self._activePreset = PRESET_NONE
         self._schedulePeriodsForRoom = {"success": False}
-        _LOGGER.info("Initializing heatapp thermostat entity index: %s", self.idx)
+        _LOGGER.info("Initializing heatapp thermostat entity key/index: %s", self.room_key)
 
     def _get_room_base(self) -> dict:
-        """Safely retrieve base room dictionary."""
-        if not self.coordinator.data or self.idx >= len(self.coordinator.data):
+        """Safely retrieve base room dictionary regardless of data structure type."""
+        if not self.coordinator.data:
             return {}
-        room = self.coordinator.data[self.idx]
+        
+        if isinstance(self.coordinator.data, dict):
+            room = self.coordinator.data.get(self.room_key, {})
+        elif isinstance(self.coordinator.data, list):
+            if isinstance(self.room_key, int) and 0 <= self.room_key < len(self.coordinator.data):
+                room = self.coordinator.data[self.room_key]
+            else:
+                return {}
+        else:
+            return {}
+            
         return room if isinstance(room, dict) else {}
 
     def _get_room_data(self) -> dict:
@@ -69,24 +88,24 @@ class HeatAppClimateEntity(CoordinatorEntity, ClimateEntity):
         return data if isinstance(data, dict) else {}
 
     async def async_added_to_hass(self) -> None:
-        """Run tasks when entity is added to registry[cite: 2]."""
+        """Run tasks when entity is added to registry."""
         await super().async_added_to_hass() 
         try: 
             await self.initOneTimeInformation()
         except Exception as exc: 
             room_base = self._get_room_base()
-            name = room_base.get("name", f"Index {self.idx}")
+            name = room_base.get("name", f"Key {self.room_key}")
             _LOGGER.warning(
                 "Failed to fetch switching times for %s: %s", 
                 name, exc
             ) 
             
     async def initOneTimeInformation(self) -> None:
-        """Fetch historical scheduling details via hub wrapper[cite: 2]."""
+        """Fetch historical scheduling details via hub wrapper."""
         room_base = self._get_room_base()
         room_data = self._get_room_data()
         room_name = room_base.get("name") or room_data.get("name")
-        room_id = room_data.get("id")
+        room_id = room_data.get("id") or room_base.get("id")
 
         if room_name and room_id is not None:
             self._schedulePeriodsForRoom = await self.hass.async_add_executor_job(
@@ -96,7 +115,7 @@ class HeatAppClimateEntity(CoordinatorEntity, ClimateEntity):
             )
 
     def getTodaysSchedule(self) -> list | None:
-        """Extract current day metrics from switching schedule[cite: 2]."""
+        """Extract current day metrics from switching schedule."""
         if getattr(self, "_schedulePeriodsForRoom", None) and self._schedulePeriodsForRoom.get("success"):            
             weekDayIndex = datetime.datetime.now().weekday()
             listStartIndex = weekDayIndex * 3
@@ -107,25 +126,32 @@ class HeatAppClimateEntity(CoordinatorEntity, ClimateEntity):
 
     @property
     def unique_id(self) -> str | None:
-        """Return a stable unique ID based on the room ID[cite: 2]."""
-        room_id = self._get_room_data().get("id")
+        """Return a stable unique ID based on the room ID."""
+        room_data = self._get_room_data()
+        room_base = self._get_room_base()
+        room_id = room_data.get("id") or room_base.get("id") or self.room_id_fallback()
         return str(room_id) if room_id is not None else None
+
+    def room_id_fallback(self):
+        """Fallback unique identifier generation if room dict lacks explicit id."""
+        room_base = self._get_room_base()
+        return room_base.get("name") or f"heatapp_room_{self.room_key}"
 
     @property
     def name(self) -> str | None:
-        """Return the name of the entity[cite: 2]."""
+        """Return the name of the entity."""
         room_base = self._get_room_base()
         room_data = self._get_room_data()
-        return room_base.get("name") or room_data.get("name") or f"Heatapp Room {self.idx}"
+        return room_base.get("name") or room_data.get("name") or f"Heatapp Room {self.room_key}"
 
     @property
     def device_info(self) -> dict:
-        """Return the device info[cite: 2]."""
+        """Return the device info."""
         uid = self.unique_id
         if not uid:
             return {}
         return {
-            "identifiers": {(DOMAIN, uid)},
+            "identifiers": {(DOMAIN, str(uid))},
             "name": self.name,
             "manufacturer": "HeatApp (Danfoss)",
             "via_device": (DOMAIN, self.coordinator.entry_id),
@@ -133,64 +159,66 @@ class HeatAppClimateEntity(CoordinatorEntity, ClimateEntity):
 
     @property
     def temperature_unit(self) -> str:
-        """Return the unit of measurement[cite: 2]."""
+        """Return the unit of measurement."""
         return UnitOfTemperature.CELSIUS
 
     @property
     def target_temperature(self) -> float | None:
-        """Return the target temperature[cite: 2]."""
+        """Return the target temperature."""
         return self._get_room_data().get("desiredTemperature")
 
     @property
     def target_temperature_step(self) -> float:
-        """Return the supported step of target temperature[cite: 2]."""
+        """Return the supported step of target temperature."""
         return 0.5
 
     @property
     def current_temperature(self) -> float | None:
-        """Return the current temperature[cite: 2]."""
+        """Return the current temperature."""
         return self._get_room_data().get("actualTemperature")
 
     @property
     def min_temp(self) -> float:
-        """Return the minimum temperature[cite: 2]."""
+        """Return the minimum temperature."""
         return self._get_room_data().get("minTemperature", 5.0)
 
     @property
     def max_temp(self) -> float:
-        """Return the maximum temperature[cite: 2]."""
+        """Return the maximum temperature."""
         return self._get_room_data().get("maxTemperature", 30.0)
 
     @property
     def supported_features(self) -> ClimateEntityFeature:
-        """Return the list of supported features[cite: 2]."""
+        """Return the list of supported features."""
         return SUPPORT_FLAGS
 
     @property
     def hvac_modes(self) -> list[HVACMode]:
-        """Return the list of available hvac operation modes[cite: 2]."""
+        """Return the list of available hvac operation modes."""
         return [HVACMode.HEAT, HVACMode.OFF]  
 
     @property
     def preset_mode(self) -> str:
-        """Return the current preset mode[cite: 2]."""
+        """Return the current preset mode."""
         self.determine_preset_membership()
         return self._activePreset
 
     @property
     def preset_modes(self) -> list[str]:
-        """Return available presets[cite: 2]."""
+        """Return available presets."""
         return [PRESET_NONE, PRESET_BOOST, PRESET_HOLIDAY, PRESET_GO, PRESET_PARTY, PRESET_STANDBY]
 
     @property
     def hvac_mode(self) -> HVACMode:
-        """Return current operation mode[cite: 2]."""
+        """Return current operation mode."""
         self.determine_mode_membership()
         return self._activeMode
 
     async def async_set_preset_mode(self, preset_mode: str) -> None:
-        """Set new preset mode via the hub context[cite: 2]."""
-        room_id = self._get_room_data().get("id")
+        """Set new preset mode via the hub context."""
+        room_data = self._get_room_data()
+        room_base = self._get_room_base()
+        room_id = room_data.get("id") or room_base.get("id")
         if room_id is None:
             return
         api_hub = self.coordinator.api_hub
@@ -209,17 +237,8 @@ class HeatAppClimateEntity(CoordinatorEntity, ClimateEntity):
             self._activePreset = preset_mode
             await self.coordinator.async_request_refresh()
 
-    def is_between_obj(self, time, range_start, range_end) -> bool:
-        """Helper to parse and evaluate schedule hours boundaries[cite: 2]."""
-        time_format = '%H:%M'
-        range_start = datetime.datetime.strptime(range_start, time_format).time()
-        range_end = datetime.datetime.strptime(range_end, time_format).time()
-        return (range_start <= time <= range_end) or (
-            range_end <= range_start and (range_start <= time or time <= range_end)
-        )
-
     def determine_preset_membership(self) -> None:
-        """Process status variables into matching HA entity presets[cite: 2]."""
+        """Process status variables into matching HA entity presets."""
         roomstatus = self._get_room_data().get("roomstatus")
         if roomstatus is None:
             return
@@ -243,7 +262,7 @@ class HeatAppClimateEntity(CoordinatorEntity, ClimateEntity):
             self._activePreset = PRESET_NONE
 
     def determine_mode_membership(self) -> None:
-        """Evaluate operational heating flags based on temperature differentials[cite: 2]."""
+        """Evaluate operational heating flags based on temperature differentials."""
         room_data = self._get_room_data()
         actual_temp = room_data.get("actualTemperature")
         target_temp = room_data.get("desiredTemperature")
@@ -252,32 +271,37 @@ class HeatAppClimateEntity(CoordinatorEntity, ClimateEntity):
             return
 
         if self._activePreset == PRESET_NONE:
-            if actual_temp <= target_temp or actual_temp > target_temp:
-                self._activeMode = HVACMode.HEAT
-            else:
-                self._activeMode = HVACMode.OFF
+            self._activeMode = HVACMode.HEAT
         elif self._activePreset in [PRESET_PARTY, PRESET_BOOST]:
             self._activeMode = HVACMode.HEAT 
         else:
             self._activeMode = HVACMode.OFF
         
     async def async_set_temperature(self, **kwargs) -> None:
-        """Set new target temperature via hub wrapper[cite: 2]."""
+        """Set new target temperature via hub wrapper."""
         temperature = kwargs.get(ATTR_TEMPERATURE)
-        room_id = self._get_room_data().get("id")
+        room_data = self._get_room_data()
+        room_base = self._get_room_base()
+        room_id = room_data.get("id") or room_base.get("id")
         if temperature is None or room_id is None:
             return
+        await self.hass.async_add_executor_job(
+            api_hub_set_temp := lambda: self.coordinator.api_hub.set_temperature(temperature, room_id)
+        ) if hasattr(self.coordinator.api_hub, 'set_temperature') else None
+        # fallback direct call:
         await self.hass.async_add_executor_job(
             self.coordinator.api_hub.set_temperature, temperature, room_id
         )
         await self.coordinator.async_request_refresh()
 
     async def turn_on(self, **kwargs) -> None: 
-        """Turn entity execution on[cite: 2]."""
+        """Turn entity execution on."""
         if self._activePreset in [PRESET_BOOST, PRESET_NONE]:
             return
         
-        room_id = self._get_room_data().get("id")
+        room_data = self._get_room_data()
+        room_base = self._get_room_base()
+        room_id = room_data.get("id") or room_base.get("id")
         if room_id is None:
             return
         
@@ -288,11 +312,13 @@ class HeatAppClimateEntity(CoordinatorEntity, ClimateEntity):
         await self.coordinator.async_request_refresh()
 
     async def turn_off(self, **kwargs) -> None:
-        """Force device into tracking standby configuration[cite: 2]."""
+        """Force device into tracking standby configuration."""
         if self._activePreset in [PRESET_GO, PRESET_HOLIDAY, PRESET_STANDBY]:
             return
         
-        room_id = self._get_room_data().get("id")
+        room_data = self._get_room_data()
+        room_base = self._get_room_base()
+        room_id = room_data.get("id") or room_base.get("id")
         if room_id is None:
             return
             
@@ -303,7 +329,7 @@ class HeatAppClimateEntity(CoordinatorEntity, ClimateEntity):
         await self.coordinator.async_request_refresh()
 
     async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
-        """Set target operational runtime environment mode mapping[cite: 2]."""
+        """Set target operational runtime environment mode mapping."""
         if hvac_mode == HVACMode.HEAT:
             await self.turn_on()
         elif hvac_mode == HVACMode.OFF:
