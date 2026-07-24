@@ -5,6 +5,7 @@ from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import device_registry as dr
 
 from .const import DOMAIN, CONF_HOST, CONF_USER, CONF_PASSWORD, CONF_INTERVAL
 
@@ -24,7 +25,19 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> b
         config_entry.options.get(CONF_INTERVAL, 30),
     )
 
+    coordinator.entry_id = config_entry.entry_id
     hass.data[DOMAIN][config_entry.entry_id] = coordinator
+
+    # Register the main Hub device in Home Assistant
+    device_registry = dr.async_get(hass)
+    device_registry.async_get_or_create(
+        config_entry_id=config_entry.entry_id,
+        identifiers={(DOMAIN, config_entry.entry_id)},
+        name="Heatapp Gateway",
+        manufacturer="HeatApp",
+        model="Local Gateway",
+        configuration_url=config_entry.data[CONF_HOST],
+    )
 
     # Perform initial refresh and handle failures so HA retries later
     try:
