@@ -82,10 +82,40 @@ class HeatAppClimateEntity(CoordinatorEntity, ClimateEntity):
         return room if isinstance(room, dict) else {}
 
     def _get_room_data(self) -> dict:
-        """Safely retrieve inner room data dictionary."""
+        """Safely retrieve inner room data dictionary handling nested layers."""
         room_base = self._get_room_base()
-        data = room_base.get("data", {})
-        return data if isinstance(data, dict) else {}
+        first_level = room_base.get("data", {})
+        
+        # Handle double-nested data structures (e.g. room['data']['data'])
+        if isinstance(first_level, dict) and "data" in first_level and isinstance(first_level["data"], dict):
+            return first_level["data"]
+            
+        return first_level if isinstance(first_level, dict) else {}
+
+    @property
+    def available(self) -> bool:
+        """Return if entity is available."""
+        try:
+            room_base = self._get_room_base()
+            if not room_base:
+                return False
+            
+            # Check for problem status in base or nested structures
+            status = room_base.get("status")
+            if status == "problem":
+                return False
+
+            first_level = room_base.get("data", {})
+            if isinstance(first_level, dict):
+                if first_level.get("status") == "problem":
+                    return False
+                inner_data = first_level.get("data", {})
+                if isinstance(inner_data, dict) and inner_data.get("status") == "problem":
+                    return False
+
+            return True
+        except (KeyError, TypeError, IndexError):
+            return False
 
     async def async_added_to_hass(self) -> None:
         """Run tasks when entity is added to registry."""
@@ -241,6 +271,8 @@ class HeatAppClimateEntity(CoordinatorEntity, ClimateEntity):
         """Process status variables into matching HA entity presets."""
         roomstatus = self._get_room_data().get("roomstatus")
         if roomstatus is None:
+            roomstatus = self._get_room_base().get("roomstatus")
+        if roomstatus is None:
             return
         
         if roomstatus == 43:
@@ -285,13 +317,11 @@ class HeatAppClimateEntity(CoordinatorEntity, ClimateEntity):
         room_id = room_data.get("id") or room_base.get("id")
         if temperature is None or room_id is None:
             return
-        await self.hass.async_add_executor_job(
-            api_hub_set_temp := lambda: self.coordinator.api_hub.set_temperature(temperature, room_id)
-        ) if hasattr(self.coordinator.api_hub, 'set_temperature') else None
-        # fallback direct call:
-        await self.hass.async_add_executor_job(
-            self.coordinator.api_hub.set_temperature, temperature, room_id
-        )
+        
+        if hasattr(self.coordinator.api_hub, 'set_temperature'):
+            await self.hass.async_add_executor_job(
+                self.coordinator.api_hub.set_temperature, temperature, room_id
+            )
         await self.coordinator.async_request_refresh()
 
     async def turn_on(self, **kwargs) -> None: 
