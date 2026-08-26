@@ -13,6 +13,7 @@ from .hub import HeatappHub
 
 _LOGGER = logging.getLogger(__name__)
 
+
 class heatAppDeviceUpdateCoordinator(DataUpdateCoordinator):
     """Gather data for the climate device."""
 
@@ -33,19 +34,17 @@ class heatAppDeviceUpdateCoordinator(DataUpdateCoordinator):
         )
         self.api_hub = HeatappHub(hass, host, user, password)
 
-    async def _async_update_data(self) -> dict:
+    async def _async_update_data(self) -> dict | list:
         """Fetch data from API endpoint asynchronously."""
         try:
-            # Wrap in a timeout and run the synchronous hub methods in an executor thread
+            # Enforce 10-second timeout for synchronous thread call
             async with asyncio.timeout(10):
                 data = await self.hass.async_add_executor_job(self.api_hub.fetch_data_sync)
-                
-            if not data:
-                raise UpdateFailed("No data received from Heatapp API")
-                
-            # Log the raw data payload to help identify key mismatches causing 'None' values in entities
+
+            if data is None:
+                raise UpdateFailed("No response received from Heatapp API")
+
             _LOGGER.debug("Raw Heatapp data received from API: %s", data)
-                
             return data
 
         except TimeoutError as err:
