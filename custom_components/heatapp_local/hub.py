@@ -14,6 +14,7 @@ from homeassistant.core import HomeAssistant
 
 _LOGGER = logging.getLogger(__name__)
 
+
 class HeatappHub:
     """Wrapper class to handle Heatapp API communication safely."""
 
@@ -24,7 +25,7 @@ class HeatappHub:
         self.user = user
         self.password = password
         self._lock = threading.Lock()
-        
+
         self.login_manager = Login(self.host)
         self.api = None
         self.scene_manager = None
@@ -43,16 +44,21 @@ class HeatappHub:
                 return False
         return True
 
+    def ping_gateway(self) -> bool:
+        """Quick health check to confirm gateway connectivity."""
+        with self._lock:
+            return self._ensure_session()
+
     def fetch_data_sync(self) -> list:
         """Synchronously initialize the API and fetch data with auto-reauthentication."""
         with self._lock:
             if not self._ensure_session():
-                return []
+                raise ConnectionError("Unable to establish session with Heatapp gateway.")
 
             # --- API DATA FETCHING ---
             try:
                 raw_rooms = self.api.getRoomsList()
-                
+
                 if not raw_rooms:
                     _LOGGER.debug("API returned no data.")
                     return []
@@ -72,14 +78,14 @@ class HeatappHub:
                             "name": room.get("name", "Unknown Room"),
                             "data": room
                         })
-                
+
                 return formatted_data
 
             except (RemoteDisconnected, requests.exceptions.RequestException) as e:
                 _LOGGER.warning("Connection lost or dropped by Heatapp device, resetting session: %s", e)
                 self.api = None
                 self.scene_manager = None
-                return []
+                raise ConnectionError(f"Heatapp communication error: {e}") from e
             except AttributeError:
                 _LOGGER.error("Method `getRoomsList` encountered an error or does not exist.")
                 return []
