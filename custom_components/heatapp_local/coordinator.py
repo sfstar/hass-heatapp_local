@@ -43,6 +43,9 @@ class heatAppDeviceUpdateCoordinator(DataUpdateCoordinator):
             if not data:
                 raise UpdateFailed("No data received from Heatapp API")
                 
+            # Log the raw data payload to help identify key mismatches causing 'None' values in entities
+            _LOGGER.debug("Raw Heatapp data received from API: %s", data)
+                
             return data
 
         except TimeoutError as err:
