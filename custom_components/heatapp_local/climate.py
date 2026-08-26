@@ -36,6 +36,12 @@ async def async_setup_entry(
     """Set up heatapp climate entities from a config entry."""
     coordinator = hass.data[DOMAIN][config_entry.entry_id]
 
+    # Ensure entities are registered only once per config entry to prevent duplication
+    domain_data = hass.data[DOMAIN].setdefault(config_entry.entry_id + "_entities_added", False)
+    if domain_data:
+        _LOGGER.debug("Climate entities already registered for this entry; skipping re-creation")
+        return
+
     if coordinator.data:
         entities = []
         if isinstance(coordinator.data, dict):
@@ -47,6 +53,7 @@ async def async_setup_entry(
         
         if entities:
             async_add_entities(entities)
+            hass.data[DOMAIN][config_entry.entry_id + "_entities_added"] = True
             _LOGGER.info("Successfully added %d HeatApp climate entities", len(entities))
         else:
             _LOGGER.warning("Coordinator data found, but no entities could be generated")
@@ -243,6 +250,20 @@ class HeatAppClimateEntity(CoordinatorEntity, ClimateEntity):
         """Return current operation mode."""
         self.determine_mode_membership()
         return self._activeMode
+
+    @property
+    def extra_state_attributes(self) -> dict[str, any]:
+        """Expose individual properties separately for automations and dashboards."""
+        room_data = self._get_room_data()
+        room_base = self._get_room_base()
+        
+        return {
+            "current_temperature": self.current_temperature,
+            "target_temperature": self.target_temperature,
+            "active_preset": self.preset_mode,
+            "active_hvac_mode": self.hvac_mode,
+            "raw_room_status": room_data.get("roomstatus") or room_base.get("roomstatus"),
+        }
 
     async def async_set_preset_mode(self, preset_mode: str) -> None:
         """Set new preset mode via the hub context."""
