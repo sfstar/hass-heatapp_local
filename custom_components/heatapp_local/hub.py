@@ -55,7 +55,6 @@ class HeatappHub:
             if not self._ensure_session():
                 raise ConnectionError("Unable to establish session with Heatapp gateway.")
 
-            # --- API DATA FETCHING ---
             try:
                 raw_rooms = self.api.getRoomsList()
 
@@ -68,16 +67,17 @@ class HeatappHub:
                 if isinstance(raw_rooms, list):
                     for room in raw_rooms:
                         formatted_data.append({
-                            "name": room.get("name", "Unknown Room"),
-                            "data": room
+                            "name": room.get("name", "Unknown Room") if isinstance(room, dict) else "Unknown Room",
+                            "data": room if isinstance(room, dict) else {}
                         })
                 elif isinstance(raw_rooms, dict):
                     rooms_list = raw_rooms.get("rooms") or raw_rooms.get("roomList") or []
                     for room in rooms_list:
-                        formatted_data.append({
-                            "name": room.get("name", "Unknown Room"),
-                            "data": room
-                        })
+                        if isinstance(room, dict):
+                            formatted_data.append({
+                                "name": room.get("name", "Unknown Room"),
+                                "data": room
+                            })
 
                 return formatted_data
 
@@ -86,8 +86,8 @@ class HeatappHub:
                 self.api = None
                 self.scene_manager = None
                 raise ConnectionError(f"Heatapp communication error: {e}") from e
-            except AttributeError:
-                _LOGGER.error("Method `getRoomsList` encountered an error or does not exist.")
+            except AttributeError as e:
+                _LOGGER.error("API error during getRoomsList: %s", e)
                 return []
             except Exception as e:
                 _LOGGER.error("Unexpected error fetching data: %s", e)
