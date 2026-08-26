@@ -1,15 +1,16 @@
 """The heatapp_local integration."""
 from __future__ import annotations
 
-from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers import device_registry as dr
 
-from .const import DOMAIN, CONF_HOST, CONF_USER, CONF_PASSWORD, CONF_INTERVAL
+from .const import CONF_HOST, CONF_INTERVAL, CONF_PASSWORD, CONF_USER, DOMAIN
 
-PLATFORMS: list[Platform] = [Platform.CLIMATE]
+# Forward setup to both climate and binary_sensor platforms
+PLATFORMS: list[Platform] = [Platform.CLIMATE, Platform.BINARY_SENSOR]
 
 
 async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> bool:
@@ -34,7 +35,7 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> b
         config_entry_id=config_entry.entry_id,
         identifiers={(DOMAIN, config_entry.entry_id)},
         name="Heatapp Gateway",
-        manufacturer="HeatApp",
+        manufacturer="HeatApp (Danfoss)",
         model="Local Gateway",
         configuration_url=config_entry.data[CONF_HOST],
     )
