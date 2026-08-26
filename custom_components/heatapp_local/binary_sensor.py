@@ -88,6 +88,6 @@ class HeatAppGatewayStatusEntity(CoordinatorEntity, BinarySensorEntity):
     def extra_state_attributes(self) -> dict[str, any]:
         """Expose connection diagnostic metadata."""
         return {
-            "last_successful_update": self.coordinator.last_update_success_time,
+            "last_successful_update": self.coordinator.last_update_success,
             "gateway_entry_id": self.config_entry.entry_id,
         }
